@@ -4,6 +4,8 @@ from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 import time
 import os
+import re
+from unidecode import unidecode
 
 # ----------------------------
 # CONFIGURAÇÕES DO APP
@@ -17,7 +19,7 @@ st.set_page_config(
 st.title("📍 Calculadora de Distância até a Capital")
 st.markdown("""
 Envie sua planilha Excel com **Cidade** e **Estado** (UF).  
-O app calcula a distância até a capital e classifica:
+O app calcula a distância até a capital e classifica em:
 - Até 50 km  
 - Entre 51 e 100 km  
 - Mais de 100 km
@@ -52,6 +54,19 @@ else:
 
 geolocator = Nominatim(user_agent="distancia_cidades_app")
 
+# ----------------------------
+# Função para padronizar cidades
+# ----------------------------
+def padronizar_cidade(cidade):
+    cidade = cidade.strip()                  # Remove espaços
+    cidade = unidecode(cidade)              # Remove acentos
+    cidade = re.sub(r'[^a-zA-Z\s]', '', cidade)  # Remove caracteres especiais
+    cidade = cidade.title()                  # Primeira letra maiúscula
+    return cidade
+
+# ----------------------------
+# Função para obter coordenadas (com cache)
+# ----------------------------
 def obter_coordenadas(cidade, estado):
     global cache
     filtro = (cache["Cidade"]==cidade) & (cache["Estado"]==estado)
@@ -68,13 +83,16 @@ def obter_coordenadas(cidade, estado):
         return location.latitude, location.longitude
     return None, None
 
+# ----------------------------
+# Função para calcular distâncias
+# ----------------------------
 def calcular_distancias(df):
     distancias, faixas = [], []
     progresso = st.progress(0)
     total = len(df)
     
     for i, row in df.iterrows():
-        cidade = str(row['Cidade']).strip()
+        cidade = padronizar_cidade(str(row['Cidade']))
         estado = str(row['Estado']).strip().upper()
         capital = capitais.get(estado,None)
         
@@ -86,7 +104,8 @@ def calcular_distancias(df):
         
         try:
             lat_cidade, lon_cidade = obter_coordenadas(cidade, estado)
-            lat_cap, lon_cap = obter_coordenadas(capital, estado)
+            lat_cap, lon_cap = obter_coordenadas(padronizar_cidade(capital), estado)
+            
             if lat_cidade and lat_cap:
                 dist = geodesic((lat_cidade, lon_cidade),(lat_cap, lon_cap)).km
                 if dist <= 50:
@@ -99,19 +118,20 @@ def calcular_distancias(df):
                 faixas.append(faixa)
             else:
                 distancias.append(None)
-                faixas.append("Não encontrado")
+                faixas.append("Cidade não encontrada")
         except:
             distancias.append(None)
             faixas.append("Erro")
+        
         progresso.progress(int((i+1)/total*100))
-        time.sleep(0.5)  # evita sobrecarregar o servidor
+        time.sleep(0.5)  # evita sobrecarga do servidor
 
     df["Distância (km)"] = distancias
     df["Faixa de Distância"] = faixas
     return df
 
 # ----------------------------
-# Execução do cálculo
+# Execução do app
 # ----------------------------
 if arquivo is not None:
     df = pd.read_excel(arquivo)
