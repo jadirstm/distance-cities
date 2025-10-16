@@ -2,37 +2,18 @@ import streamlit as st
 import pandas as pd
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
-import time
 import os
 import re
 from unidecode import unidecode
+import time
 
-# ----------------------------
-# CONFIGURAÇÕES DO APP
-# ----------------------------
-st.set_page_config(
-    page_title="Distância até a Capital",
-    page_icon="📍",
-    layout="centered"
-)
-
+st.set_page_config(page_title="Distância até a Capital", layout="centered")
 st.title("📍 Calculadora de Distância até a Capital")
-st.markdown("""
-Envie sua planilha Excel com **Cidade** e **Estado** (UF).  
-O app calcula a distância até a capital e classifica em:
-- Até 50 km  
-- Entre 51 e 100 km  
-- Mais de 100 km
-""")
 
-# ----------------------------
 # Upload do arquivo
-# ----------------------------
 arquivo = st.file_uploader("📂 Envie sua planilha (.xlsx)", type=["xlsx"])
 
-# ----------------------------
 # Dicionário de capitais
-# ----------------------------
 capitais = {
     "AC": "Rio Branco", "AL": "Maceió", "AP": "Macapá", "AM": "Manaus",
     "BA": "Salvador", "CE": "Fortaleza", "DF": "Brasília", "ES": "Vitória",
@@ -43,9 +24,7 @@ capitais = {
     "SP": "São Paulo", "SE": "Aracaju", "TO": "Palmas"
 }
 
-# ----------------------------
 # Arquivo de cache
-# ----------------------------
 CACHE_FILE = "coordenadas_cache.csv"
 if os.path.exists(CACHE_FILE):
     cache = pd.read_csv(CACHE_FILE)
@@ -54,19 +33,16 @@ else:
 
 geolocator = Nominatim(user_agent="distancia_cidades_app")
 
-# ----------------------------
-# Função para padronizar cidades
-# ----------------------------
+# Função para padronizar cidade
 def padronizar_cidade(cidade):
-    cidade = cidade.strip()                  # Remove espaços
-    cidade = unidecode(cidade)              # Remove acentos
-    cidade = re.sub(r'[^a-zA-Z\s]', '', cidade)  # Remove caracteres especiais
-    cidade = cidade.title()                  # Primeira letra maiúscula
+    cidade = str(cidade)
+    cidade = cidade.strip()                   # remove espaços no começo/fim
+    cidade = re.sub(r'\s+', ' ', cidade)     # remove múltiplos espaços
+    cidade = unidecode(cidade)               # remove acentos
+    cidade = cidade.title()                  # transforma em "Capitalized Words"
     return cidade
 
-# ----------------------------
 # Função para obter coordenadas (com cache)
-# ----------------------------
 def obter_coordenadas(cidade, estado):
     global cache
     filtro = (cache["Cidade"]==cidade) & (cache["Estado"]==estado)
@@ -83,16 +59,14 @@ def obter_coordenadas(cidade, estado):
         return location.latitude, location.longitude
     return None, None
 
-# ----------------------------
 # Função para calcular distâncias
-# ----------------------------
 def calcular_distancias(df):
     distancias, faixas = [], []
     progresso = st.progress(0)
     total = len(df)
     
     for i, row in df.iterrows():
-        cidade = padronizar_cidade(str(row['Cidade']))
+        cidade = padronizar_cidade(row['Cidade'])
         estado = str(row['Estado']).strip().upper()
         capital = capitais.get(estado,None)
         
@@ -124,15 +98,13 @@ def calcular_distancias(df):
             faixas.append("Erro")
         
         progresso.progress(int((i+1)/total*100))
-        time.sleep(0.5)  # evita sobrecarga do servidor
+        time.sleep(0.2)
 
     df["Distância (km)"] = distancias
     df["Faixa de Distância"] = faixas
     return df
 
-# ----------------------------
 # Execução do app
-# ----------------------------
 if arquivo is not None:
     df = pd.read_excel(arquivo)
     st.write("📄 **Prévia da planilha enviada:**")
@@ -143,11 +115,9 @@ if arquivo is not None:
             resultado = calcular_distancias(df)
         st.success("✅ Cálculo concluído!")
         st.dataframe(resultado.head())
-
+        
         # Download
-        output = pd.ExcelWriter("resultado.xlsx", engine="openpyxl")
-        resultado.to_excel(output, index=False)
-        output.close()
+        resultado.to_excel("resultado.xlsx", index=False)
         with open("resultado.xlsx","rb") as f:
             st.download_button(
                 label="💾 Baixar resultado",
