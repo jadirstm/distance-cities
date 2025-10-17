@@ -13,11 +13,13 @@ st.title("📍 Calculadora de Distância até a Capital")
 uploaded_file = st.file_uploader("Envie a planilha Excel com a aba VALIDADA", type=["xlsx"])
 
 # === Função de leitura segura ===
-def carregar_planilha(caminho):
+def carregar_planilha_excel(file):
     try:
-        xls = pd.ExcelFile(caminho, engine='openpyxl')
-        st.write("🧾 Abas encontradas:", xls.sheet_names)  # mostra as abas detectadas
-        return pd.read_excel(xls, sheet_name='VALIDADA')
+        df = pd.read_excel(file, sheet_name="VALIDADA")  # lê apenas a aba VALIDADA
+        df = df[['Cidade', 'Estado']].dropna()
+        df['Cidade'] = df['Cidade'].astype(str).str.strip()
+        df['Estado'] = df['Estado'].astype(str).str.strip().str.upper()
+        return df
     except Exception as e:
         st.error(f"Erro ao ler planilha: {e}")
         return None
