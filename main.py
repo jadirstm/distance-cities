@@ -1,127 +1,107 @@
-import streamlit as st
 import pandas as pd
-from geopy.geocoders import Nominatim
+import streamlit as st
 from geopy.distance import geodesic
-import os
-import re
-from unidecode import unidecode
+from geopy.geocoders import Nominatim
 import time
+import os
 
-st.set_page_config(page_title="Distância até a Capital", layout="centered")
+st.set_page_config(page_title="Distância das Capitais", layout="wide")
+
 st.title("📍 Calculadora de Distância até a Capital")
 
-# Upload do arquivo
-arquivo = st.file_uploader("📂 Envie sua planilha (.xlsx)", type=["xlsx"])
+# === Upload do arquivo Excel ===
+uploaded_file = st.file_uploader("Envie a planilha Excel com a aba VALIDADA", type=["xlsx"])
 
-# Dicionário de capitais
-capitais = {
-    "AC": "Rio Branco", "AL": "Maceió", "AP": "Macapá", "AM": "Manaus",
-    "BA": "Salvador", "CE": "Fortaleza", "DF": "Brasília", "ES": "Vitória",
-    "GO": "Goiânia", "MA": "São Luís", "MT": "Cuiabá", "MS": "Campo Grande",
-    "MG": "Belo Horizonte", "PA": "Belém", "PB": "João Pessoa", "PR": "Curitiba",
-    "PE": "Recife", "PI": "Teresina", "RJ": "Rio de Janeiro", "RN": "Natal",
-    "RS": "Porto Alegre", "RO": "Porto Velho", "RR": "Boa Vista", "SC": "Florianópolis",
-    "SP": "São Paulo", "SE": "Aracaju", "TO": "Palmas"
-}
+# === Função de leitura segura ===
+def carregar_planilha_excel(file):
+    try:
+        df = pd.read_excel(file, sheet_name="VALIDADA")  # lê apenas a aba VALIDADA
+        df = df[['Cidade', 'Estado']].dropna()
+        df['Cidade'] = df['Cidade'].astype(str).str.strip()
+        df['Estado'] = df['Estado'].astype(str).str.strip().str.upper()
+        return df
+    except Exception as e:
+        st.error(f"Erro ao ler planilha: {e}")
+        return None
 
-# Arquivo de cache
-CACHE_FILE = "coordenadas_cache.csv"
-if os.path.exists(CACHE_FILE):
-    cache = pd.read_csv(CACHE_FILE)
-else:
-    cache = pd.DataFrame(columns=["Cidade","Estado","Latitude","Longitude"])
-
-geolocator = Nominatim(user_agent="distancia_cidades_app")
-
-# Função para padronizar cidade
-def padronizar_cidade(cidade):
-    cidade = str(cidade)
-    cidade = cidade.strip()                   # remove espaços no começo/fim
-    cidade = re.sub(r'\s+', ' ', cidade)     # remove múltiplos espaços
-    cidade = unidecode(cidade)               # remove acentos
-    cidade = cidade.title()                  # transforma em "Capitalized Words"
-    return cidade
-
-# Função para obter coordenadas (com cache)
-def obter_coordenadas(cidade, estado):
-    global cache
-    filtro = (cache["Cidade"]==cidade) & (cache["Estado"]==estado)
-    if filtro.any():
-        lat = cache.loc[filtro, "Latitude"].values[0]
-        lon = cache.loc[filtro, "Longitude"].values[0]
-        return lat, lon
-    # Busca online
-    location = geolocator.geocode(f"{cidade}, {estado}, Brasil")
-    if location:
-        nova_linha = {"Cidade":cidade,"Estado":estado,"Latitude":location.latitude,"Longitude":location.longitude}
-        cache = pd.concat([cache,pd.DataFrame([nova_linha])], ignore_index=True)
-        cache.to_csv(CACHE_FILE, index=False)
-        return location.latitude, location.longitude
-    return None, None
-
-# Função para calcular distâncias
-def calcular_distancias(df):
-    distancias, faixas = [], []
-    progresso = st.progress(0)
-    total = len(df)
+# === Função para calcular coordenadas ===
+def obter_coordenadas(cidade, estado, cache):
+    chave = f"{cidade}-{estado}"
+    if chave in cache:
+        return cache[chave]
     
-    for i, row in df.iterrows():
-        cidade = padronizar_cidade(row['Cidade'])
-        estado = str(row['Estado']).strip().upper()
-        capital = capitais.get(estado,None)
-        
+    geolocator = Nominatim(user_agent="distance_app")
+    try:
+        location = geolocator.geocode(f"{cidade}, {estado}, Brasil", timeout=10)
+        if location:
+            coordenadas = (location.latitude, location.longitude)
+            cache[chave] = coordenadas
+            return coordenadas
+    except:
+        return None
+    return None
+
+# === Função para calcular distância até a capital ===
+def calcular_distancias(df):
+    cache = {}
+    resultados = []
+
+    # dicionário com as capitais por UF
+    capitais = {
+        "SP": "São Paulo", "RJ": "Rio de Janeiro", "MG": "Belo Horizonte", "PR": "Curitiba",
+        "SC": "Florianópolis", "RS": "Porto Alegre", "GO": "Goiânia", "DF": "Brasília",
+        "BA": "Salvador", "PE": "Recife", "CE": "Fortaleza", "PA": "Belém", "AM": "Manaus",
+        "ES": "Vitória", "MT": "Cuiabá", "MS": "Campo Grande", "MA": "São Luís",
+        "PB": "João Pessoa", "PI": "Teresina", "RN": "Natal", "RO": "Porto Velho",
+        "RR": "Boa Vista", "SE": "Aracaju", "AL": "Maceió", "AP": "Macapá", "TO": "Palmas",
+        "AC": "Rio Branco"
+    }
+
+    geolocator = Nominatim(user_agent="distance_app")
+
+    for _, row in df.iterrows():
+        cidade = row['Cidade']
+        estado = row['Estado']
+        capital = capitais.get(estado)
+
         if not capital:
-            distancias.append(None)
-            faixas.append("Estado inválido")
-            progresso.progress(int((i+1)/total*100))
             continue
-        
-        try:
-            lat_cidade, lon_cidade = obter_coordenadas(cidade, estado)
-            lat_cap, lon_cap = obter_coordenadas(padronizar_cidade(capital), estado)
-            
-            if lat_cidade and lat_cap:
-                dist = geodesic((lat_cidade, lon_cidade),(lat_cap, lon_cap)).km
-                if dist <= 50:
-                    faixa = "Até 50 km"
-                elif dist <= 100:
-                    faixa = "Entre 51 e 100 km"
-                else:
-                    faixa = "Mais de 100 km"
-                distancias.append(round(dist,1))
-                faixas.append(faixa)
+
+        origem = obter_coordenadas(cidade, estado, cache)
+        destino = obter_coordenadas(capital, estado, cache)
+
+        if origem and destino:
+            distancia = geodesic(origem, destino).km
+            if distancia <= 50:
+                faixa = "Até 50 km"
+            elif distancia <= 100:
+                faixa = "51 a 100 km"
             else:
-                distancias.append(None)
-                faixas.append("Cidade não encontrada")
-        except:
-            distancias.append(None)
-            faixas.append("Erro")
-        
-        progresso.progress(int((i+1)/total*100))
-        time.sleep(0.2)
+                faixa = "Mais de 100 km"
+        else:
+            distancia = None
+            faixa = "Não encontrado"
 
-    df["Distância (km)"] = distancias
-    df["Faixa de Distância"] = faixas
-    return df
+        resultados.append({
+            "Cidade": cidade,
+            "Estado": estado,
+            "Capital": capital,
+            "Distância (km)": round(distancia, 1) if distancia else "Erro",
+            "Faixa": faixa
+        })
+        time.sleep(1)  # respeita limite do geocoding gratuito
 
-# Execução do app
-if arquivo is not None:
-    df = pd.read_excel(arquivo)
-    st.write("📄 **Prévia da planilha enviada:**")
-    st.dataframe(df.head())
+    return pd.DataFrame(resultados)
 
-    if st.button("▶️ Calcular Distâncias"):
-        with st.spinner("Calculando..."):
+# === Execução ===
+if uploaded_file:
+    df = carregar_planilha_excel(uploaded_file)
+    if df is not None:
+        with st.spinner("Calculando distâncias..."):
             resultado = calcular_distancias(df)
-        st.success("✅ Cálculo concluído!")
-        st.dataframe(resultado.head())
-        
-        # Download
-        resultado.to_excel("resultado.xlsx", index=False)
-        with open("resultado.xlsx","rb") as f:
-            st.download_button(
-                label="💾 Baixar resultado",
-                data=f,
-                file_name="resultado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            st.success("✅ Cálculo concluído!")
+            st.dataframe(resultado)
+
+            # opção para download
+            csv = resultado.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Baixar resultado CSV", csv, "distancias_capitais.csv", "text/csv")
